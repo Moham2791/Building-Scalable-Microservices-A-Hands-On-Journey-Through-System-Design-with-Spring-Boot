@@ -1,0 +1,595 @@
+#!/bin/bash
+# Setup script for Task Management System on Ubuntu VM
+# Run as: bash setup-vm-infrastructure.sh
+
+# Step 1: Set up Ubuntu VM in VirtualBox
+# 1.1 Download Ubuntu 24.04 LTS ISO: https://ubuntu.com/download/server
+# 1.2 In VirtualBox:
+#     - Create new VM (Name: TaskManagementVM, Type: Linux, Version: Ubuntu 64-bit)
+#     - Allocate: 4GB RAM, 2 CPUs, 20GB disk
+#     - Mount Ubuntu ISO in Settings > Storage
+#     - Enable Network: NAT, Adapter 1
+#     - Add port forwarding in Network > Advanced > Port Forwarding:
+#       - 8761->8761, 8080->8080, 8081->8081, 8082->8082, 8083->8080, 9090->9090, 3000->3000, 5672->5672, 15672->15672, 9411->9411
+# 1.3 Start VM, install Ubuntu Server (default settings, enable SSH)
+# 1.4 Log in to VM via SSH or VirtualBox console
+
+# Step 2: Install prerequisites in Ubuntu VM
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y openjdk-17-jdk maven ca-certificates curl
+
+# Step 3: Install Docker and Docker Compose V2
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt update
+sudo apt install -y docker.io docker-compose-plugin
+sudo systemctl start docker
+sudo systemctl enable docker
+sudo usermod -aG docker $USER
+# Log out and back in
+
+# Step 4: Create project directory structure
+mkdir -p ~/TaskManagementSystem/{eureka-server,user-service,task-service,api-gateway}/src/main/{java/com/example/{eurekaserver,userservice,taskservice,apigateway},resources}
+cd ~/TaskManagementSystem
+
+# Step 5: Create Eureka Server files
+cat << EOF > eureka-server/pom.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>eureka-server</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.2</version>
+    </parent>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-server</artifactId>
+        </dependency>
+    </dependencies>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>2023.0.3</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>3.3.2</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+EOF
+
+cat << EOF > eureka-server/src/main/java/com/example/eurekaserver/EurekaServerApplication.java
+package com.example.eurekaserver;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.netflix.eureka.server.EnableEurekaServer;
+@SpringBootApplication
+@EnableEurekaServer
+public class EurekaServerApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(EurekaServerApplication.class, args);
+    }
+}
+EOF
+
+cat << EOF > eureka-server/src/main/resources/application.yml
+server:
+  port: 8761
+spring:
+  application:
+    name: eureka-server
+eureka:
+  client:
+    register-with-eureka: false
+    fetch-registry: false
+EOF
+
+cat << EOF > eureka-server/Dockerfile
+FROM openjdk:17-jdk-slim
+COPY target/eureka-server-1.0-SNAPSHOT.jar /app.jar
+ENTRYPOINT ["java", "-jar", "/app.jar"]
+EOF
+
+# Step 6: Create User Service files
+cat << EOF > user-service/pom.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>user-service</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.2</version>
+    </parent>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+        </dependency>
+    </dependencies>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>2023.0.3</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>3.3.2</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+EOF
+
+cat << EOF > user-service/src/main/java/com/example/userservice/UserServiceApplication.java
+package com.example.userservice;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
+@SpringBootApplication
+@EnableDiscoveryClient
+public class UserServiceApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(UserServiceApplication.class, args);
+    }
+}
+EOF
+
+cat << EOF > user-service/src/main/resources/application.yml
+spring:
+  application:
+    name: user-service
+  datasource:
+    url: jdbc:postgresql://postgres:5432/userdb
+    username: user
+    password: password
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        temp:
+          use_jdbc_metadata_defaults: false
+        jdbc:
+          lob:
+            non_contextual_creation: true
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka:8761/eureka
+server:
+  port: 8081
+EOF
+
+cat << EOF > user-service/Dockerfile
+FROM openjdk:17-jdk-slim
+COPY target/user-service-1.0-SNAPSHOT.jar /app.jar
+ENTRYPOINT ["java", "-jar", "/app.jar"]
+EOF
+
+# Step 7: Create Task Service files
+cat << EOF > task-service/pom.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>task-service</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.2</version>
+    </parent>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+        </dependency>
+    </dependencies>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>2023.0.3</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>3.3.2</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+EOF
+
+cat << EOF > task-service/src/main/java/com/example/taskservice/TaskServiceApplication.java
+package com.example.taskservice;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
+@SpringBootApplication
+@EnableDiscoveryClient
+public class TaskServiceApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(TaskServiceApplication.class, args);
+    }
+}
+EOF
+
+cat << EOF > task-service/src/main/resources/application.yml
+spring:
+  application:
+    name: task-service
+  datasource:
+    url: jdbc:postgresql://postgres:5432/taskdb
+    username: user
+    password: password
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        temp:
+          use_jdbc_metadata_defaults: false
+        jdbc:
+          lob:
+            non_contextual_creation: true
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka:8761/eureka
+server:
+  port: 8082
+EOF
+
+cat << EOF > task-service/Dockerfile
+FROM openjdk:17-jdk-slim
+COPY target/task-service-1.0-SNAPSHOT.jar /app.jar
+ENTRYPOINT ["java", "-jar", "/app.jar"]
+EOF
+
+# Step 8: Create API Gateway files
+cat << EOF > api-gateway/pom.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>api-gateway</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.2</version>
+    </parent>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-gateway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+        </dependency>
+    </dependencies>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>2023.0.3</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>3.3.2</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+EOF
+
+cat << EOF > api-gateway/src/main/java/com/example/apigateway/ApiGatewayApplication.java
+package com.example.apigateway;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
+@SpringBootApplication
+@EnableDiscoveryClient
+public class ApiGatewayApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(ApiGatewayApplication.class, args);
+    }
+}
+EOF
+
+cat << EOF > api-gateway/src/main/resources/application.yml
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: user-service
+          uri: lb://user-service
+          predicates:
+            - Path=/users/**
+        - id: task-service
+          uri: lb://task-service
+          predicates:
+            - Path=/tasks/**
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka:8761/eureka
+server:
+  port: 8080
+EOF
+
+cat << EOF > api-gateway/Dockerfile
+FROM openjdk:17-jdk-slim
+COPY target/api-gateway-1.0-SNAPSHOT.jar /app.jar
+ENTRYPOINT ["java", "-jar", "/app.jar"]
+EOF
+
+# Step 9: Create Docker Compose and supporting files
+cat << EOF > docker-compose.yml
+version: '3.8'
+services:
+  eureka:
+    build: ./eureka-server
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8761"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  user-service:
+    build: ./user-service
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/userdb
+      - SPRING_DATASOURCE_USERNAME=user
+      - SPRING_DATASOURCE_PASSWORD=password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eureka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  task-service:
+    build: ./task-service
+    ports:
+      - "8082:8082"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/taskdb
+      - SPRING_DATASOURCE_USERNAME=user
+      - SPRING_DATASOURCE_PASSWORD=password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      eureka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      eureka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_MULTIPLE_DATABASES=userdb,taskdb
+    volumes:
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+  keycloak:
+    image: quay.io/keycloak/keycloak:22.0
+    environment:
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+    command: start-dev
+    ports:
+      - "8083:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  zipkin:
+    image: openzipkin/zipkin
+    ports:
+      - "9411:9411"
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+EOF
+
+cat << EOF > init-db.sh
+#!/bin/bash
+psql -U user -d postgres -c "CREATE DATABASE userdb;"
+psql -U user -d postgres -c "CREATE DATABASE taskdb;"
+EOF
+
+cat << EOF > prometheus.yml
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+  - job_name: 'user-service'
+    static_configs:
+      - targets: ['user-service:8081']
+  - job_name: 'task-service'
+    static_configs:
+      - targets: ['task-service:8082']
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:8080']
+EOF
+
+# Step 10: Build JARs
+cd ~/TaskManagementSystem/eureka-server
+mvn clean package -U
+cd ../user-service
+mvn clean package -U
+cd ../task-service
+mvn clean package -U
+cd ../api-gateway
+mvn clean package -U
+
+# Step 11: Run Docker Compose
+cd ~/TaskManagementSystem
+chmod +x init-db.sh
+docker compose down
+docker compose up -d --build
+
+# Step 12: Verify services
+echo "Waiting for services to start..."
+sleep 30
+docker ps
+ip addr show
+
+# Step 13: Configure Keycloak
+echo "Configure Keycloak at http://<vm-ip>:8083 with admin/admin"
+echo "1. Create realm: task-realm"
+echo "2. Create client: task-client (enable Client authentication, set redirect URI to http://<vm-ip>:8080/*, note client secret)"
+echo "3. Create user: john, set password (e.g., password123)"

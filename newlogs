@@ -1,0 +1,24 @@
+=> [eureka internal] load build definition from Dockerfile                                                                    0.0s
+ => => transferring dockerfile: 155B                                                                                           0.0s
+ => [eureka internal] load metadata for docker.io/library/openjdk:17-jdk-slim                                                  0.3s
+ => [eureka internal] load .dockerignore                                                                                       0.0s
+ => => transferring context: 2B                                                                                                0.0s
+ => [eureka internal] load build context                                                                                       0.0s
+ => => transferring context: 2.85kB                                                                                            0.0s
+ => CACHED [eureka 1/2] FROM docker.io/library/openjdk:17-jdk-slim@sha256:aaa3b3cb27e3e520b8f116863d0580c438ed55ecfa0bc126b41  0.0s
+ => [eureka 2/2] COPY target/eureka-server-1.0-SNAPSHOT.jar /app.jar                                                           0.0s
+ => [eureka] exporting to image                                                                                                0.0s
+ => => exporting layers                                                                                                        0.0s
+ => => writing image sha256:23435c1ee8d7910d5d6899592af19bbcb17b0965d28c709d2b596b658846911d                                   0.0s
+ => => naming to docker.io/library/shared-eureka                                                                               0.0s
+ => [user-service internal] load build definition from Dockerfile                                                              0.0s
+ => => transferring dockerfile: 2B                                                                                             0.0s
+ => [task-service internal] load build definition from Dockerfile                                                              0.0s
+ => => transferring dockerfile: 2B                                                                                             0.0s
+ => [api-gateway internal] load build definition from Dockerfile                                                               0.1s
+ => => transferring dockerfile: 2B                                                                                             0.0s
+failed to solve: failed to read dockerfile: open Dockerfile: no such file or directory
+
+ls -l ~/TaskManagementSystem/{user-service,task-service,api-gateway}
+
+

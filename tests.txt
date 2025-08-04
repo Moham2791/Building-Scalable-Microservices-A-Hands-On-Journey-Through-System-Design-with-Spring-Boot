@@ -1,0 +1,21 @@
+
+
+
+Get Key Cloak Token
+ http://curl -X POST http://172.17.0.1:8083/realms/task-realm/protocol/openid-connect/token \
+-d "client_id=task-client" \
+-d "client_secret=<your-secret>" \
+-d "grant_type=password" \
+-d "username=john" \
+-d "password=<password>"
+
+EUreka http://172.17.0.1:8761
+KeycLoak http://172.17.0.1:8083
+Grafana: http://172.17.0.1:3000
+
+Test User Service:
+
+curl -X POST http://172.17.0.1:8080/users \
+-H "Authorization: Bearer <token>" \
+-H "Content-Type: application/json" \
+-d '{"id": 1, "username": "john", "email": "john@example.com", "role": "USER"}'

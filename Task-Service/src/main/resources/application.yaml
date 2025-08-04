@@ -1,0 +1,31 @@
+server:
+  port: 8082
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/taskdb
+    username: user
+    password: password
+  jpa:
+    hibernate:
+      ddl-auto: update
+  rabbitmq:
+    host: rabbitmq
+    port: 5672
+  cloud:
+    loadbalancer:
+      ribbon:
+        enabled: false
+eureka:
+  client:
+    service-url:
+      defaultZone: http://eureka:8761/eureka/
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  tracing:
+    sampling:
+      probability: 1.0
+spring.zipkin:
+  base-url: http://zipkin:9411/
